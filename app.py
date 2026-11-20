@@ -6,6 +6,7 @@ from flask import Flask, request
 load_dotenv()
 
 INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
+WEBHOOK_VERIFY_TOKEN = os.getenv('WEBHOOK_VERIFY_TOKEN')
 
 app = Flask(__name__)
 
@@ -27,6 +28,18 @@ def instagram_callback():
         return 'Código de autorização não recebido.', 400
 
     return f'Código de autorização recebido: {code}'
+
+
+@app.route('/webhook', methods=['GET'])
+def webhook_verification():
+    verify_token = request.args.get('hub.verify_token')
+    challenge = request.args.get('hub.challenge')
+    mode = request.args.get('hub.mode')
+
+    if mode == 'subscribe' and verify_token == WEBHOOK_VERIFY_TOKEN:
+        return challenge, 200
+
+    return 'Token de verificação inválido', 403
 
 
 if __name__ == '__main__':
