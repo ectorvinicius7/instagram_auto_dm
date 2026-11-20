@@ -42,5 +42,16 @@ def webhook_verification():
     return 'Token de verificação inválido', 403
 
 
+@app.route('/webhook', methods=['POST'])
+def webhook_receive():
+    data = request.get_json(silent=True)
+
+    print('\n===== WEBHOOK RECEBIDO =====')
+    print(data)
+    print('============================\n')
+
+    return 'EVENT_RECEIVED', 200
+
+
 if __name__ == '__main__':
     app.run(debug=True)
