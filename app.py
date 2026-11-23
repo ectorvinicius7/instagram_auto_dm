@@ -14,7 +14,7 @@ WEBHOOK_VERIFY_TOKEN = os.getenv('WEBHOOK_VERIFY_TOKEN')
 
 app = Flask(__name__)
 
-def enviar_resposta_privada(instagram_id, comment_id, mensagem):
+def enviar_resposta_privada(instagram_id, comment_id):
     url = f'https://graph.facebook.com/v27.0/{instagram_id}/messages'
 
     payload = {
@@ -22,7 +22,20 @@ def enviar_resposta_privada(instagram_id, comment_id, mensagem):
             'comment_id': comment_id
         },
         'message': {
-            'text': mensagem
+            'attachment': {
+                'type': 'template',
+                'payload': {
+                    'template_type': 'button',
+                    'text': 'Olá! 😊 Que bom que você se interessou! Toque no botão abaixo para conferir o produto.',
+                    'buttons': [
+                        {
+                            'type': 'web_url',
+                            'url': 'https://s.shopee.com.br/5VX8IZ4Wtw',
+                            'title': 'VER PRODUTO'
+                        }
+                    ]
+                }
+            }
         }
     }
 
@@ -53,7 +66,6 @@ def enviar_resposta_privada(instagram_id, comment_id, mensagem):
     except urllib.error.URLError as erro:
         print(f'Erro de conexão: {erro.reason}')
         return False
-
 
 @app.route('/')
 def home():
@@ -115,12 +127,18 @@ def webhook_receive():
                 print(f'ID da publicação: {media_id}')
 
                 # Verifica a palavra-chave
-                if comment_text and comment_text.strip().casefold() == 'quero':
+                if comment_text and comment_text.strip().casefold() in ['quero', 'eu quero', 'quero o link', 'link', 'me envia', 'manda o link', 'me manda', 'tenho interesse', 'envia pra mim']:
                     print('PALAVRA-CHAVE IDENTIFICADA!')
+
+                    if instagram_id and comment_id:
+                        enviar_resposta_privada(instagram_id, comment_id)
+                    else:
+                        print('Dados insuficientes para enviar a mensagem.')
+
                 else:
                     print('Palavra-chave não identificada.')
 
-    print('============================\n')
+        print('============================\n')
 
     return 'EVENT_RECEIVED', 200
 
