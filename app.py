@@ -1,5 +1,9 @@
 
 import os
+import json
+import urllib.request
+import urllib.error
+
 from dotenv import load_dotenv
 from flask import Flask, request
 
@@ -9,6 +13,46 @@ INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
 WEBHOOK_VERIFY_TOKEN = os.getenv('WEBHOOK_VERIFY_TOKEN')
 
 app = Flask(__name__)
+
+def enviar_resposta_privada(instagram_id, comment_id, mensagem):
+    url = f'https://graph.facebook.com/v27.0/{instagram_id}/messages'
+
+    payload = {
+        'recipient': {
+            'comment_id': comment_id
+        },
+        'message': {
+            'text': mensagem
+        }
+    }
+
+    dados = json.dumps(payload).encode('utf-8')
+
+    requisicao = urllib.request.Request(
+        url,
+        data=dados,
+        headers={
+            'Authorization': f'Bearer {INSTAGRAM_ACCESS_TOKEN}',
+            'Content-Type': 'application/json'
+        },
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(requisicao) as resposta:
+            resultado = json.loads(resposta.read().decode('utf-8'))
+            print('Resposta privada enviada com sucesso!')
+            print(f'Retorno da API: {resultado}')
+            return True
+
+    except urllib.error.HTTPError as erro:
+        detalhes = erro.read().decode('utf-8')
+        print(f'Erro da API ({erro.code}): {detalhes}')
+        return False
+
+    except urllib.error.URLError as erro:
+        print(f'Erro de conexão: {erro.reason}')
+        return False
 
 
 @app.route('/')
@@ -57,7 +101,7 @@ def webhook_receive():
             if change.get('field') == 'comments':
                 comment = change.get('value', {})
 
-                comment_id = comment.get('id')
+                comment_id = comment.get('comment_id') or comment.get('id')
                 comment_text = comment.get('text')
                 media = comment.get('media', {})
                 media_id = media.get('id')
