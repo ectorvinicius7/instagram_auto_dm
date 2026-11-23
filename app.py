@@ -1,6 +1,6 @@
 
-import sqlite3
 import os
+import psycopg
 import json
 import urllib.request
 import urllib.error
@@ -13,71 +13,67 @@ load_dotenv()
 INSTAGRAM_ACCESS_TOKEN = os.getenv('INSTAGRAM_ACCESS_TOKEN')
 WEBHOOK_VERIFY_TOKEN = os.getenv('WEBHOOK_VERIFY_TOKEN')
 
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+
+def obter_conexao():
+    if not DATABASE_URL:
+        raise RuntimeError('DATABASE_URL não configurada.')
+
+    return psycopg.connect(DATABASE_URL)
+
 app = Flask(__name__)
 
 def inicializar_banco():
-    conexao = sqlite3.connect('instagram.db')
-
-    conexao.execute('''
-        CREATE TABLE IF NOT EXISTS comentarios_processados (
-            comment_id TEXT PRIMARY KEY,
-            status TEXT NOT NULL
-        )
-    ''')
-
-    conexao.commit()
-    conexao.close()
+    with obter_conexao() as conexao:
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS comentarios_processados (
+                comment_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL
+            )
+        ''')
 
 
 inicializar_banco()
 
+
 def registrar_comentario(comment_id):
-    conexao = sqlite3.connect('instagram.db')
+    with obter_conexao() as conexao:
+        cursor = conexao.execute(
+            '''
+            INSERT INTO comentarios_processados
+            (comment_id, status)
+            VALUES (%s, %s)
+            ON CONFLICT (comment_id) DO NOTHING
+            RETURNING comment_id
+            ''',
+            (comment_id, 'processando')
+        )
 
-    cursor = conexao.execute(
-        '''
-        INSERT OR IGNORE INTO comentarios_processados
-        (comment_id, status)
-        VALUES (?, ?)
-        ''',
-        (comment_id, 'processando')
-    )
+        return cursor.fetchone() is not None
 
-    registrado = cursor.rowcount == 1
-
-    conexao.commit()
-    conexao.close()
-
-    return registrado
 
 def atualizar_status_comentario(comment_id, status):
-    conexao = sqlite3.connect('instagram.db')
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            UPDATE comentarios_processados
+            SET status = %s
+            WHERE comment_id = %s
+            ''',
+            (status, comment_id)
+        )
 
-    conexao.execute(
-        '''
-        UPDATE comentarios_processados
-        SET status = ?
-        WHERE comment_id = ?
-        ''',
-        (status, comment_id)
-    )
-
-    conexao.commit()
-    conexao.close()
 
 def remover_comentario(comment_id):
-    conexao = sqlite3.connect('instagram.db')
-
-    conexao.execute(
-        '''
-        DELETE FROM comentarios_processados
-        WHERE comment_id = ?
-        ''',
-        (comment_id,)
-    )
-
-    conexao.commit()
-    conexao.close()
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            DELETE FROM comentarios_processados
+            WHERE comment_id = %s
+            ''',
+            (comment_id,)
+        )
 
 def enviar_resposta_privada(instagram_id, comment_id):
     url = f'https://graph.facebook.com/v27.0/{instagram_id}/messages'
