@@ -4,6 +4,7 @@ import psycopg
 import json
 import urllib.request
 import urllib.error
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from flask import Flask, request
@@ -24,8 +25,11 @@ def obter_conexao():
 
 app = Flask(__name__)
 
+
 def inicializar_banco():
     with obter_conexao() as conexao:
+
+        # Comentários já processados
         conexao.execute('''
             CREATE TABLE IF NOT EXISTS comentarios_processados (
                 comment_id TEXT PRIMARY KEY,
@@ -33,8 +37,101 @@ def inicializar_banco():
             )
         ''')
 
+        # Publicações comerciais
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS publicacoes_comerciais (
+                media_id TEXT PRIMARY KEY,
+                ativo BOOLEAN NOT NULL DEFAULT TRUE
+            )
+        ''')
 
-inicializar_banco()
+        # Produtos associados às publicações
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS produtos_publicacao (
+                id BIGSERIAL PRIMARY KEY,
+                media_id TEXT NOT NULL
+                    REFERENCES publicacoes_comerciais(media_id)
+                    ON DELETE CASCADE,
+                nome TEXT NOT NULL,
+                url TEXT NOT NULL,
+                ativo BOOLEAN NOT NULL DEFAULT TRUE
+            )
+        ''')
+
+def cadastrar_publicacao(media_id):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            INSERT INTO publicacoes_comerciais (media_id)
+            VALUES (%s)
+            ON CONFLICT (media_id) DO NOTHING
+            ''',
+            (media_id,)
+        )
+
+def cadastrar_produto(media_id, nome, url):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            INSERT INTO produtos_publicacao
+            (media_id, nome, url)
+            VALUES (%s, %s, %s)
+            ''',
+            (media_id, nome, url)
+        )
+
+
+def obter_produtos(media_id):
+    with obter_conexao() as conexao:
+        cursor = conexao.execute(
+            '''
+            SELECT id, nome, url
+            FROM produtos_publicacao
+            WHERE media_id = %s
+            AND ativo = TRUE
+            ''',
+            (media_id,)
+        )
+
+        return cursor.fetchall()
+
+def publicacao_ativa(media_id):
+    with obter_conexao() as conexao:
+        cursor = conexao.execute(
+            '''
+            SELECT ativo
+            FROM publicacoes_comerciais
+            WHERE media_id = %s
+            ''',
+            (media_id,)
+        )
+
+        resultado = cursor.fetchone()
+
+        return resultado is not None and resultado[0] is True
+
+def desativar_publicacao(media_id):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            UPDATE publicacoes_comerciais
+            SET ativo = FALSE
+            WHERE media_id = %s
+            ''',
+            (media_id,)
+        )
+
+
+def ativar_publicacao(media_id):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            UPDATE publicacoes_comerciais
+            SET ativo = TRUE
+            WHERE media_id = %s
+            ''',
+            (media_id,)
+        )
 
 
 def registrar_comentario(comment_id):
@@ -75,7 +172,26 @@ def remover_comentario(comment_id):
             (comment_id,)
         )
 
-def enviar_resposta_privada(instagram_id, comment_id):
+
+
+def enviar_resposta_privada(instagram_id, comment_id, media_id):
+    produtos = obter_produtos(media_id)
+
+    if not produtos:
+        print('Nenhum produto ativo encontrado para esta publicação.')
+        return False
+
+    mensagem = 'Olá! 😊 Que bom que você se interessou!\n\n'
+    mensagem += 'Confira nossos produtos:\n\n'
+
+    for produto in produtos:
+        produto_id, nome, url_produto = produto
+
+        mensagem += f'🛍️ {nome}\n'
+        mensagem += f'{url_produto}\n\n'
+
+    mensagem += 'Aproveite! ❤️'
+
     url = f'https://graph.facebook.com/v27.0/{instagram_id}/messages'
 
     payload = {
@@ -83,20 +199,7 @@ def enviar_resposta_privada(instagram_id, comment_id):
             'comment_id': comment_id
         },
         'message': {
-            'attachment': {
-                'type': 'template',
-                'payload': {
-                    'template_type': 'button',
-                    'text': 'Olá! 😊 Que bom que você se interessou! Toque no botão abaixo para conferir o produto.',
-                    'buttons': [
-                        {
-                            'type': 'web_url',
-                            'url': 'https://s.shopee.com.br/5VX8IZ4Wtw',
-                            'title': 'VER PRODUTO'
-                        }
-                    ]
-                }
-            }
+            'text': mensagem
         }
     }
 
@@ -115,7 +218,7 @@ def enviar_resposta_privada(instagram_id, comment_id):
     try:
         with urllib.request.urlopen(requisicao) as resposta:
             resultado = json.loads(resposta.read().decode('utf-8'))
-            print('Resposta privada enviada com sucesso!')
+            print('Mensagem privada enviada com sucesso!')
             print(f'Retorno da API: {resultado}')
             return True
 
@@ -127,6 +230,41 @@ def enviar_resposta_privada(instagram_id, comment_id):
     except urllib.error.URLError as erro:
         print(f'Erro de conexão: {erro.reason}')
         return False
+
+
+def responder_comentario(comment_id):
+    url = f'https://graph.facebook.com/v27.0/{comment_id}/replies'
+
+    dados = urlencode({
+        'message': 'Obrigado por comentar! Te enviei uma mensagem no direct, confere lá!!! 😉'
+    }).encode('utf-8')
+
+    requisicao = urllib.request.Request(
+        url,
+        data=dados,
+        headers={
+            'Authorization': f'Bearer {INSTAGRAM_ACCESS_TOKEN}',
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        method='POST'
+    )
+
+    try:
+        with urllib.request.urlopen(requisicao) as resposta:
+            resultado = json.loads(resposta.read().decode('utf-8'))
+            print('Resposta pública enviada com sucesso!')
+            print(f'Retorno da API: {resultado}')
+            return True
+
+    except urllib.error.HTTPError as erro:
+        detalhes = erro.read().decode('utf-8')
+        print(f'Erro ao responder comentário ({erro.code}): {detalhes}')
+        return False
+
+    except urllib.error.URLError as erro:
+        print(f'Erro de conexão: {erro.reason}')
+        return False
+
 
 @app.route('/')
 def home():
@@ -158,6 +296,7 @@ def webhook_verification():
 
     return 'Token de verificação inválido', 403
 
+
 @app.route('/webhook', methods=['POST'])
 def webhook_receive():
     data = request.get_json(silent=True)
@@ -171,48 +310,73 @@ def webhook_receive():
         instagram_id = entry.get('id')
 
         for change in entry.get('changes', []):
-            if change.get('field') == 'comments':
-                comment = change.get('value', {})
 
-                comment_id = comment.get('comment_id') or comment.get('id')
-                comment_text = comment.get('text')
-                media = comment.get('media', {})
-                media_id = media.get('id')
-                user = comment.get('from', {})
-                username = user.get('username')
+            if change.get('field') != 'comments':
+                continue
 
-                print(f'Conta Instagram: {instagram_id}')
-                print(f'ID do comentário: {comment_id}')
-                print(f'Usuário: {username}')
-                print(f'Comentário: {comment_text}')
-                print(f'ID da publicação: {media_id}')
+            comment = change.get('value', {})
 
-                # Verifica a palavra-chave
-                if comment_text and comment_text.strip().casefold() in ['quero', 'gostei', 'quero o link', 'eu quero', 'quero o link', 'link', 'me envia', 'manda o link', 'me manda', 'tenho interesse', 'envia pra mim']:
-                    print('PALAVRA-CHAVE IDENTIFICADA!')
+            comment_id = comment.get('comment_id') or comment.get('id')
+            comment_text = comment.get('text')
+            media = comment.get('media', {})
+            media_id = media.get('id')
+            user = comment.get('from', {})
+            username = user.get('username')
+            user_id = user.get('id')
 
-                    if instagram_id and comment_id:
-                        if not registrar_comentario(comment_id):
-                            print('Comentário já processado. Mensagem não enviada.')
-                            continue
+            print(f'Usuário: {username}')
+            print(f'Comentário: {comment_text}')
+            print(f'ID da publicação: {media_id}')
 
-                        sucesso = enviar_resposta_privada(instagram_id, comment_id)
+            # Verifica se os dados necessários existem
+            if not instagram_id or not comment_id or not media_id:
+                print('Dados insuficientes. Comentário ignorado.')
+                continue
 
-                        if sucesso:
-                            atualizar_status_comentario(comment_id, 'enviado')
-                        else:
-                            remover_comentario(comment_id)
-                            print('Registro removido. Uma nova tentativa será permitida.')
-                    else:
-                        print('Dados insuficientes para enviar a mensagem.')
+            # Impede que o próprio bot responda
+            if user_id and str(user_id) == str(instagram_id):
+                print('Comentário da própria conta. Ignorado.')
+                continue
 
-                else:
-                    print('Palavra-chave não identificada.')
+            # Verifica se a publicação é comercial e está ativa
+            if not publicacao_ativa(media_id):
+                print('Publicação sem automação. Comentário ignorado.')
+                continue
+
+            # Verifica se existem produtos cadastrados
+            produtos = obter_produtos(media_id)
+
+            if not produtos:
+                print('Nenhum produto ativo cadastrado. Comentário ignorado.')
+                continue
+
+            # Evita processar o mesmo comentário novamente
+            if not registrar_comentario(comment_id):
+                print('Comentário já processado. Ignorado.')
+                continue
+
+            print('PUBLICAÇÃO COMERCIAL IDENTIFICADA!')
+
+            # Resposta pública
+            sucesso_publico = responder_comentario(comment_id)
+
+            # Mensagem privada com os produtos
+            sucesso_privado = enviar_resposta_privada(
+                instagram_id,
+                comment_id,
+                media_id
+            )
+
+            # Registra o resultado das duas operações
+            if sucesso_publico and sucesso_privado:
+                atualizar_status_comentario(comment_id, 'enviado')
+                print('AUTOMAÇÃO CONCLUÍDA COM SUCESSO!')
+
+            else:
+                atualizar_status_comentario(comment_id, 'parcial')
+                print('Atenção: uma ou mais mensagens não foram enviadas.')
 
         print('============================\n')
 
     return 'EVENT_RECEIVED', 200
 
-
-if __name__ == '__main__':
-    app.run(debug=True)
