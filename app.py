@@ -37,6 +37,32 @@ def inicializar_banco():
             )
         ''')
 
+        # Controle individual dos envios
+        conexao.execute('''
+            ALTER TABLE comentarios_processados
+            ADD COLUMN IF NOT EXISTS status_publico TEXT
+        ''')
+
+        conexao.execute('''
+            ALTER TABLE comentarios_processados
+            ADD COLUMN IF NOT EXISTS status_privado TEXT
+        ''')
+
+        # Atualiza registros antigos
+        conexao.execute('''
+            UPDATE comentarios_processados
+            SET status_publico = 'enviado',
+                status_privado = 'enviado'
+            WHERE status = 'enviado'
+        ''')
+
+        conexao.execute('''
+            UPDATE comentarios_processados
+            SET status_publico = 'revisar',
+                status_privado = 'revisar'
+            WHERE status IN ('parcial', 'processando')
+        ''')
+
         # Publicações comerciais
         conexao.execute('''
             CREATE TABLE IF NOT EXISTS publicacoes_comerciais (
@@ -139,12 +165,12 @@ def registrar_comentario(comment_id):
         cursor = conexao.execute(
             '''
             INSERT INTO comentarios_processados
-            (comment_id, status)
-            VALUES (%s, %s)
+            (comment_id, status, status_publico, status_privado)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (comment_id) DO NOTHING
             RETURNING comment_id
             ''',
-            (comment_id, 'processando')
+            (comment_id, 'processando', 'pendente', 'pendente')
         )
 
         return cursor.fetchone() is not None
@@ -161,6 +187,41 @@ def atualizar_status_comentario(comment_id, status):
             (status, comment_id)
         )
 
+def atualizar_status_publico(comment_id, status):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            UPDATE comentarios_processados
+            SET status_publico = %s
+            WHERE comment_id = %s
+            ''',
+            (status, comment_id)
+        )
+
+
+def atualizar_status_privado(comment_id, status):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            UPDATE comentarios_processados
+            SET status_privado = %s
+            WHERE comment_id = %s
+            ''',
+            (status, comment_id)
+        )
+
+def obter_status_envios(comment_id):
+    with obter_conexao() as conexao:
+        cursor = conexao.execute(
+            '''
+            SELECT status_publico, status_privado
+            FROM comentarios_processados
+            WHERE comment_id = %s
+            ''',
+            (comment_id,)
+        )
+
+        return cursor.fetchone()
 
 def remover_comentario(comment_id):
     with obter_conexao() as conexao:
