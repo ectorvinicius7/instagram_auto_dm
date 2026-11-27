@@ -32,10 +32,10 @@ PALAVRAS_CHAVE = [
 
 # Respostas públicas aleatórias
 RESPOSTAS_PUBLICAS = [
-    'Oi! 😍 Te enviamos os detalhes pelo Direct!',
-    'Olá! ❤️ Dá uma olhadinha na sua caixa de entrada!',
-    'Oba! 🥰 Confira seu Direct, enviamos tudo por lá!',
-    'Oi! 💕 Acabamos de te enviar uma mensagem!'
+    'Oi! Te enviamos os detalhes pelo Direct!',
+    'Olá! Dá uma olhadinha no seu Direct!',
+    'Oba! Confira seu Direct, enviamos tudo por lá!',
+    'Oi! Acabei de te enviar uma mensagem no Direct!'
 ]
 
 
