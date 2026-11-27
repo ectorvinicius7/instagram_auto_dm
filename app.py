@@ -43,17 +43,17 @@ RESPOSTAS_PUBLICAS = [
 PRODUTOS = [
     {
         'nome': 'Climatizador Industrial 70L',
-        'link': 'https://link-da-shopee'
+        'link': 'https://s.shopee.com.br/7fbi3lyHLz'
     },
     {
-        'nome': 'Mini Umificador Portátil',
-        'link': 'https://link-do-mercado-livre'
+        'nome': 'Mini Umidificador Portátil',
+        'link': 'https://meli.la/2gnnPBZ'
     }
 ]
 
 
 # Grupo de ofertas no WhatsApp
-LINK_GRUPO_WHATSAPP = 'https://chat.whatsapp.com/SEU-LINK'
+LINK_GRUPO_WHATSAPP = 'https://chat.whatsapp.com/DMGboe0eJ0ZBZdF2Y0dMuY'
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 
@@ -148,18 +148,6 @@ def atualizar_status_resposta_publica(comment_id, status):
             ''',
             (status, comment_id)
         )
-
-def atualizar_status_direct(comment_id, status):
-    with obter_conexao() as conexao:
-        conexao.execute(
-            '''
-            UPDATE comentarios_processados
-            SET direct_status = %s
-            WHERE comment_id = %s
-            ''',
-            (status, comment_id)
-        )
-
 
 def atualizar_status_direct(comment_id, status):
     with obter_conexao() as conexao:
