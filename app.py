@@ -93,6 +93,8 @@ def inicializar_banco():
                 resposta_publica_status = 'enviado',
                 direct_status = 'enviado'
             WHERE status = 'enviado'
+            AND resposta_publica_status = 'pendente'
+            AND direct_status = 'pendente'
         ''')
 
 
