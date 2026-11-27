@@ -96,6 +96,12 @@ def inicializar_banco():
             AND resposta_publica_status = 'pendente'
             AND direct_status = 'pendente'
         ''')
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS publicacoes_automacao (
+                media_id TEXT PRIMARY KEY,
+                ativa BOOLEAN NOT NULL DEFAULT TRUE
+            )
+        ''')
 
 
 inicializar_banco()
@@ -127,7 +133,34 @@ def registrar_comentario(comment_id):
 
         return cursor.fetchone() is not None
 
+def publicacao_esta_ativa(media_id):
+    if not media_id:
+        return False
 
+    with obter_conexao() as conexao:
+        cursor = conexao.execute(
+            '''
+            SELECT ativa
+            FROM publicacoes_automacao
+            WHERE media_id = %s
+            ''',
+            (media_id,)
+        )
+
+        resultado = cursor.fetchone()
+
+        return resultado is not None and resultado[0] is True
+
+def cadastrar_publicacao(media_id):
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            INSERT INTO publicacoes_automacao (media_id)
+            VALUES (%s)
+            ON CONFLICT (media_id) DO NOTHING
+            ''',
+            (media_id,)
+        )
 
 def atualizar_status_comentario(comment_id, status):
     with obter_conexao() as conexao:
@@ -347,6 +380,10 @@ def webhook_receive():
                 print(f'Usuário: {username}')
                 print(f'Comentário: {comment_text}')
                 print(f'ID da publicação: {media_id}')
+
+                if not publicacao_esta_ativa(media_id):
+                    print('Publicação não cadastrada ou automação desativada. Comentário ignorado.')
+                    continue
 
                 if comment_text and comment_text.strip().casefold() in PALAVRAS_CHAVE:
                     print('PALAVRA-CHAVE IDENTIFICADA!')
