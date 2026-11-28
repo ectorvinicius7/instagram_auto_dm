@@ -66,6 +66,7 @@ def obter_conexao():
 
 app = Flask(__name__)
 
+
 def inicializar_banco():
     with obter_conexao() as conexao:
         conexao.execute('''
@@ -96,6 +97,7 @@ def inicializar_banco():
             AND resposta_publica_status = 'pendente'
             AND direct_status = 'pendente'
         ''')
+
         conexao.execute('''
             CREATE TABLE IF NOT EXISTS publicacoes_automacao (
                 media_id TEXT PRIMARY KEY,
@@ -103,8 +105,43 @@ def inicializar_banco():
             )
         ''')
 
+        conexao.execute('''
+            ALTER TABLE publicacoes_automacao
+            ADD COLUMN IF NOT EXISTS nome TEXT
+        ''')
+
+        conexao.execute('''
+            ALTER TABLE publicacoes_automacao
+            ADD COLUMN IF NOT EXISTS mensagem_direct TEXT
+        ''')
+
+        conexao.execute('''
+            ALTER TABLE publicacoes_automacao
+            ADD COLUMN IF NOT EXISTS link_produto TEXT
+        ''')
+
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS palavras_chave_publicacao (
+                id BIGSERIAL PRIMARY KEY,
+                media_id TEXT NOT NULL REFERENCES
+                    publicacoes_automacao(media_id) ON DELETE CASCADE,
+                palavra TEXT NOT NULL,
+                UNIQUE (media_id, palavra)
+            )
+        ''')
+
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS respostas_publicas_publicacao (
+                id BIGSERIAL PRIMARY KEY,
+                media_id TEXT NOT NULL REFERENCES
+                    publicacoes_automacao(media_id) ON DELETE CASCADE,
+                mensagem TEXT NOT NULL
+            )
+        ''')
+
 
 inicializar_banco()
+
 
 
 
@@ -151,16 +188,281 @@ def publicacao_esta_ativa(media_id):
 
         return resultado is not None and resultado[0] is True
 
-def cadastrar_publicacao(media_id):
+
+def cadastrar_publicacao(
+    media_id,
+    nome,
+    link_produto,
+    mensagem_direct,
+    palavras_chave=None,
+    respostas_publicas=None
+):
+    palavras_chave = palavras_chave or []
+    respostas_publicas = respostas_publicas or []
+
     with obter_conexao() as conexao:
         conexao.execute(
             '''
-            INSERT INTO publicacoes_automacao (media_id)
-            VALUES (%s)
-            ON CONFLICT (media_id) DO NOTHING
+            INSERT INTO publicacoes_automacao (
+                media_id,
+                ativa,
+                nome,
+                link_produto,
+                mensagem_direct
+            )
+            VALUES (%s, FALSE, %s, %s, %s)
+            ''',
+            (
+                media_id,
+                nome,
+                link_produto,
+                mensagem_direct
+            )
+        )
+
+        for palavra in palavras_chave:
+            conexao.execute(
+                '''
+                INSERT INTO palavras_chave_publicacao (
+                    media_id,
+                    palavra
+                )
+                VALUES (%s, %s)
+                ''',
+                (media_id, palavra.strip().casefold())
+            )
+
+        for mensagem in respostas_publicas:
+            conexao.execute(
+                '''
+                INSERT INTO respostas_publicas_publicacao (
+                    media_id,
+                    mensagem
+                )
+                VALUES (%s, %s)
+                ''',
+                (media_id, mensagem.strip())
+            )
+
+
+def listar_publicacoes():
+    with obter_conexao() as conexao:
+        resultados = conexao.execute(
+            '''
+            SELECT
+                p.media_id,
+                p.nome,
+                p.ativa,
+                p.link_produto,
+                p.mensagem_direct,
+
+                COALESCE(
+                    (
+                        SELECT array_agg(pc.palavra ORDER BY pc.id)
+                        FROM palavras_chave_publicacao pc
+                        WHERE pc.media_id = p.media_id
+                    ),
+                    ARRAY[]::TEXT[]
+                ) AS palavras_chave,
+
+                COALESCE(
+                    (
+                        SELECT array_agg(rp.mensagem ORDER BY rp.id)
+                        FROM respostas_publicas_publicacao rp
+                        WHERE rp.media_id = p.media_id
+                    ),
+                    ARRAY[]::TEXT[]
+                ) AS respostas_publicas
+
+            FROM publicacoes_automacao p
+            ORDER BY p.nome
+            '''
+        ).fetchall()
+
+        colunas = [
+            'media_id',
+            'nome',
+            'ativa',
+            'link_produto',
+            'mensagem_direct',
+            'palavras_chave',
+            'respostas_publicas'
+        ]
+
+        return [
+            dict(zip(colunas, resultado))
+            for resultado in resultados
+        ]
+
+
+def alterar_status_publicacao(media_id, ativa):
+    with obter_conexao() as conexao:
+        resultado = conexao.execute(
+            '''
+            UPDATE publicacoes_automacao
+            SET ativa = %s
+            WHERE media_id = %s
+            RETURNING media_id, ativa
+            ''',
+            (ativa, media_id)
+        ).fetchone()
+
+        if resultado is None:
+            return None
+
+        return {
+            'media_id': resultado[0],
+            'ativa': resultado[1]
+        }
+
+
+def atualizar_publicacao(
+    media_id,
+    nome,
+    link_produto,
+    mensagem_direct
+):
+    with obter_conexao() as conexao:
+        resultado = conexao.execute(
+            '''
+            UPDATE publicacoes_automacao
+            SET
+                nome = %s,
+                link_produto = %s,
+                mensagem_direct = %s
+            WHERE media_id = %s
+            RETURNING media_id, nome, link_produto, mensagem_direct
+            ''',
+            (
+                nome,
+                link_produto,
+                mensagem_direct,
+                media_id
+            )
+        ).fetchone()
+
+        if resultado is None:
+            return None
+
+        return {
+            'media_id': resultado[0],
+            'nome': resultado[1],
+            'link_produto': resultado[2],
+            'mensagem_direct': resultado[3]
+        }
+
+def obter_configuracao_publicacao(media_id):
+    with obter_conexao() as conexao:
+        resultado = conexao.execute(
+            '''
+            SELECT
+                nome,
+                ativa,
+                link_produto,
+                mensagem_direct
+            FROM publicacoes_automacao
+            WHERE media_id = %s
+            ''',
+            (media_id,)
+        ).fetchone()
+
+        if resultado is None:
+            return None
+
+        return {
+            'nome': resultado[0],
+            'ativa': resultado[1],
+            'link_produto': resultado[2],
+            'mensagem_direct': resultado[3]
+        }
+
+def atualizar_palavras_chave(media_id, palavras_chave):
+    palavras_normalizadas = list(dict.fromkeys(
+        palavra.strip().casefold()
+        for palavra in palavras_chave
+        if palavra.strip()
+    ))
+
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            DELETE FROM palavras_chave_publicacao
+            WHERE media_id = %s
             ''',
             (media_id,)
         )
+
+        for palavra in palavras_normalizadas:
+            conexao.execute(
+                '''
+                INSERT INTO palavras_chave_publicacao (
+                    media_id,
+                    palavra
+                )
+                VALUES (%s, %s)
+                ''',
+                (media_id, palavra)
+            )
+
+
+def listar_palavras_chave(media_id):
+    with obter_conexao() as conexao:
+        resultados = conexao.execute(
+            '''
+            SELECT palavra
+            FROM palavras_chave_publicacao
+            WHERE media_id = %s
+            ORDER BY id
+            ''',
+            (media_id,)
+        ).fetchall()
+
+        return [resultado[0] for resultado in resultados]
+
+
+def atualizar_respostas_publicas(media_id, respostas):
+    respostas_filtradas = [
+        resposta.strip()
+        for resposta in respostas
+        if resposta.strip()
+    ]
+
+    with obter_conexao() as conexao:
+        conexao.execute(
+            '''
+            DELETE FROM respostas_publicas_publicacao
+            WHERE media_id = %s
+            ''',
+            (media_id,)
+        )
+
+        for resposta in respostas_filtradas:
+            conexao.execute(
+                '''
+                INSERT INTO respostas_publicas_publicacao (
+                    media_id,
+                    mensagem
+                )
+                VALUES (%s, %s)
+                ''',
+                (media_id, resposta)
+            )
+
+
+def listar_respostas_publicas(media_id):
+    with obter_conexao() as conexao:
+        resultados = conexao.execute(
+            '''
+            SELECT mensagem
+            FROM respostas_publicas_publicacao
+            WHERE media_id = %s
+            ORDER BY id
+            ''',
+            (media_id,)
+        ).fetchall()
+
+        return [resultado[0] for resultado in resultados]
+
 
 def atualizar_status_comentario(comment_id, status):
     with obter_conexao() as conexao:
@@ -207,10 +509,17 @@ def remover_comentario(comment_id):
         )
 
 
-def responder_comentario_publicamente(comment_id):
+
+def responder_comentario_publicamente(comment_id, media_id):
+    respostas = listar_respostas_publicas(media_id)
+
+    if not respostas:
+        print('Nenhuma resposta pública cadastrada para esta publicação.')
+        return False
+
     url = f'https://graph.facebook.com/v27.0/{comment_id}/replies'
 
-    mensagem = random.choice(RESPOSTAS_PUBLICAS)
+    mensagem = random.choice(respostas)
 
     payload = {
         'message': mensagem
@@ -247,33 +556,34 @@ def responder_comentario_publicamente(comment_id):
 
 
 
-def enviar_resposta_privada(instagram_id, comment_id):
+
+def enviar_resposta_privada(instagram_id, comment_id, media_id):
+    configuracao = obter_configuracao_publicacao(media_id)
+
+    if configuracao is None:
+        print('Publicação não encontrada.')
+        return False
+
+    if not configuracao['ativa']:
+        print('Automação desativada para esta publicação.')
+        return False
+
+    if not configuracao['link_produto']:
+        print('Link do produto não cadastrado.')
+        return False
+
+    if not configuracao['mensagem_direct']:
+        print('Mensagem privada não cadastrada.')
+        return False
+
     url = f'https://graph.facebook.com/v27.0/{instagram_id}/messages'
 
-    botoes = [
-        {
-            'type': 'web_url',
-            'url': PRODUTOS[0]['link'],
-            'title': 'Ver na Shopee'
-        },
-        {
-            'type': 'web_url',
-            'url': PRODUTOS[1]['link'],
-            'title': 'Ver no Mercado Livre'
-        },
-        {
-            'type': 'web_url',
-            'url': LINK_GRUPO_WHATSAPP,
-            'title': 'Grupo WhatsApp'
-        }
-    ]
-
     mensagem = (
-        'Olá! 😊 Que bom que você se interessou!\n\n'
-        f'Confira nossos produtos:\n'
-        f'• {PRODUTOS[0]["nome"]}\n'
-        f'• {PRODUTOS[1]["nome"]}\n\n'
-        'Escolha uma das opções abaixo:'
+        f"{configuracao['mensagem_direct']}\n\n"
+        f"🛍️ Link do produto:\n"
+        f"{configuracao['link_produto']}\n\n"
+        f"📲 Entre também no nosso grupo:\n"
+        f"{LINK_GRUPO_WHATSAPP}"
     )
 
     payload = {
@@ -281,14 +591,7 @@ def enviar_resposta_privada(instagram_id, comment_id):
             'comment_id': comment_id
         },
         'message': {
-            'attachment': {
-                'type': 'template',
-                'payload': {
-                    'template_type': 'button',
-                    'text': mensagem,
-                    'buttons': botoes
-                }
-            }
+            'text': mensagem
         }
     }
 
@@ -385,7 +688,23 @@ def webhook_receive():
                     print('Publicação não cadastrada ou automação desativada. Comentário ignorado.')
                     continue
 
-                if comment_text and comment_text.strip().casefold() in PALAVRAS_CHAVE:
+                palavras_chave = listar_palavras_chave(media_id)
+
+                comentario_normalizado = (
+                    comment_text.strip().casefold()
+                    if comment_text
+                    else ''
+                )
+
+                palavra_chave_identificada = (
+                    not palavras_chave
+                    or any(
+                        palavra in comentario_normalizado
+                        for palavra in palavras_chave
+                    )
+                )
+
+                if comentario_normalizado and palavra_chave_identificada:
                     print('PALAVRA-CHAVE IDENTIFICADA!')
 
                     if not instagram_id or not comment_id:
@@ -397,7 +716,10 @@ def webhook_receive():
                         continue
 
                     # Tenta responder publicamente
-                    sucesso_publico = responder_comentario_publicamente(comment_id)
+                    sucesso_publico = responder_comentario_publicamente(
+                        comment_id,
+                        media_id
+                    )
 
                     if sucesso_publico:
                         atualizar_status_resposta_publica(comment_id, 'enviado')
@@ -411,7 +733,11 @@ def webhook_receive():
                     for tentativa in range(1, 4):
                         print(f'Tentativa {tentativa} de envio do Direct.')
 
-                        sucesso_direct = enviar_resposta_privada(instagram_id, comment_id)
+                        sucesso_direct = enviar_resposta_privada(
+                            instagram_id,
+                            comment_id,
+                            media_id
+                        )
 
                         if sucesso_direct:
                             atualizar_status_direct(comment_id, 'enviado')
